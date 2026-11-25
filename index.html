@@ -108,7 +108,6 @@ button { font: inherit; color: inherit; }
   text-underline-offset: 4px;
   cursor: help;
 }
-.verrou .terme { text-decoration: none; cursor: inherit; }
 #infobulle {
   position: fixed; left: 0; top: 0; z-index: 100;
   max-width: min(300px, calc(100vw - 32px));
@@ -948,7 +947,7 @@ function cacherBulle() {
 document.addEventListener("mouseover", ev => {
   const t = ev.target.closest(".terme");
   if (t === termeActif) return;
-  if (t && !t.closest(".verrou")) montrerBulle(t);
+  if (t) montrerBulle(t);
   else cacherBulle();
 });
 document.addEventListener("pointerdown", ev => { if (!ev.target.closest(".terme")) cacherBulle(); });
@@ -1073,7 +1072,7 @@ function afficherQuestion(id, index) {
         <span><span class="niveau-tag">${md(niveau.titre)}</span> · Question ${index + 1}/${niveau.questions.length}</span>
       </div>
       <div class="progression" aria-hidden="true">${segments}</div>
-      <article class="question verrou">
+      <article class="question">
         <div class="type">${badge}</div>
         <p class="enonce">${md(q.enonce)}</p>
         ${q.consigne ? `<p class="consigne">${md(q.consigne)}</p>` : `<div style="height:14px"></div>`}
@@ -1101,7 +1100,6 @@ function enregistrer(id, index, ok) {
   }
   sauver();
   vue.repondu = true;
-  $app.querySelector(".question").classList.remove("verrou");
   const seg = $app.querySelectorAll(".progression span")[index];
   if (seg) seg.className = ok ? "ok" : "ko";
 }
