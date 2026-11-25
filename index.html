@@ -102,6 +102,28 @@ code {
 a { color: inherit; }
 button { font: inherit; color: inherit; }
 
+.terme {
+  text-decoration: underline dotted color-mix(in srgb, var(--c, var(--ink-2)) 75%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+  cursor: help;
+}
+.verrou .terme { text-decoration: none; cursor: inherit; }
+#infobulle {
+  position: fixed; left: 0; top: 0; z-index: 100;
+  max-width: min(300px, calc(100vw - 32px));
+  padding: 9px 12px; border-radius: 8px;
+  background: var(--ink); color: var(--bg);
+  font: 400 13.5px/1.45 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: 0; text-align: left; text-transform: none;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  visibility: hidden; opacity: 0; transform: translateY(3px);
+  transition: opacity .12s ease, transform .12s ease, visibility 0s linear .12s;
+}
+#infobulle.visible { visibility: visible; opacity: 1; transform: none; transition-delay: 0s; }
+#infobulle code { background: color-mix(in srgb, var(--bg) 18%, transparent); border-color: transparent; color: inherit; }
+
 .page {
   max-width: 760px;
   margin: 0 auto;
@@ -788,6 +810,43 @@ const NIVEAUX = [
   },
 ];
 
+const TERMES = {
+  "claude": { def: "Lance Claude Code dans le dossier courant : c’est ce dossier qu’il pourra lire et modifier." },
+  "claude --continue": { def: "Relance Claude Code en reprenant la conversation la plus récente de ce dossier. Version courte : `claude -c`." },
+  "claude -p": { def: "Mode non interactif : un prompt en entrée, la réponse en sortie, puis Claude s’arrête. Pour les scripts et la CI." },
+  "CLAUDE.md": { def: "Fichier d’instructions du projet (commandes, conventions, pièges), lu automatiquement au début de chaque session." },
+  "/clear": { def: "Vide la conversation pour repartir de zéro. `CLAUDE.md` est rechargé." },
+  "/resume": { def: "Liste les conversations passées de ce dossier pour en reprendre une." },
+  "/rewind": { def: "Revient à un point antérieur : le code, la conversation, ou les deux. Raccourci : `Échap` deux fois." },
+  "/init": { def: "Analyse le projet et rédige un premier `CLAUDE.md`." },
+  "/context": { def: "Montre ce qui occupe la fenêtre de contexte (instructions, outils, messages) et la place restante." },
+  "/compact": { def: "Remplace la conversation par un résumé pour libérer du contexte. On peut préciser quoi garder." },
+  "/model": { def: "Choisit le modèle utilisé (Opus, Sonnet, Haiku…)." },
+  "/effort": { def: "Règle combien le modèle réfléchit avant d’agir : plus d’effort aide sur le difficile, mais c’est plus lent et plus cher." },
+  "/grill-me": { def: "Skill communautaire, à installer : Claude pose ses questions une par une, avec sa recommandation, avant d’écrire du code." },
+  "Échap": { def: "Interrompt Claude tout de suite. Deux fois de suite : menu pour revenir en arrière (`/rewind`)." },
+  "Shift+Tab": { def: "Fait défiler les modes de permission : normal, acceptation automatique des éditions, plan mode…" },
+  "@": { def: "Mentionne un fichier ou un dossier : son contenu est ajouté au contexte. Exemple : `@src/app.ts`." },
+  "!": { def: "Mode shell : la ligne est exécutée directement dans le terminal, et sa sortie est ajoutée à la conversation." },
+  "claude-code": { mots: "Claude Code", def: "L’agent de code d’Anthropic : Claude dans le terminal, avec des outils pour lire, modifier et lancer des commandes." },
+  "plan-mode": { mots: "plan mode", def: "Mode en lecture seule : Claude explore et propose un plan, sans toucher aux fichiers avant validation." },
+  "modes-permission": { mots: "modes? de permission", def: "Niveau d’autonomie de Claude : tout demander, accepter les éditions seul, ou plan mode. On change avec `Shift+Tab`." },
+  "demandes-permission": { mots: "demandes? de permission", def: "Avant une action sensible, Claude Code demande l’accord : accepter une fois, accepter pour la suite, ou refuser." },
+  "permissions": { mots: "permissions", def: "Règles qui fixent ce que Claude fait seul, ce qu’il doit demander, et ce qui lui est interdit (`/permissions`)." },
+  "points-restauration": { mots: "points de restauration", def: "Claude Code mémorise l’état des fichiers avant chaque édition, pour pouvoir y revenir avec `/rewind`." },
+  "skill": { mots: "skills?", def: "Dossier d’instructions (et de scripts) dont seule la description est chargée ; le contenu n’est lu que quand la tâche s’y prête." },
+  "subagent": { mots: "subagents?", def: "Agent secondaire lancé par Claude avec un contexte vierge : il travaille de son côté et ne renvoie qu’un résumé." },
+  "hook": { mots: "hooks?", def: "Script lancé automatiquement par Claude Code à un moment précis (avant ou après un outil, en fin de tour…), sans dépendre du modèle." },
+  "mcp": { mots: "serveurs? MCP|MCP", def: "Model Context Protocol : standard pour brancher des outils externes à Claude (base de données, navigateur, tickets…)." },
+  "harnais": { mots: "harnais", def: "Le programme Claude Code autour du modèle : il exécute les outils demandés, gère le contexte et applique les permissions." },
+  "bac-a-sable": { mots: "bac à sable", def: "Isolation qui limite les fichiers et le réseau accessibles aux commandes lancées par Claude (`/sandbox`)." },
+};
+const MOTS = Object.entries(TERMES)
+  .filter(([, t]) => t.mots)
+  .sort(([, a], [, b]) => b.mots.length - a.mots.length)
+  .map(([cle, t]) => ({ cle, source: t.mots, re: new RegExp(`^(?:${t.mots})$`, "iu") }));
+const RE_MOTS = new RegExp(`(?<![\\p{L}\\d])(?:${MOTS.map(m => `(?:${m.source})`).join("|")})(?![\\p{L}\\d])`, "giu");
+
 /* =====================================================================
    État et sauvegarde (localStorage, uniquement dans ce navigateur)
    ===================================================================== */
@@ -838,11 +897,63 @@ const $app = document.getElementById("app");
 function echapper(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+function texteSimple(s) {
+  return echapper(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+const baliseTerme = (cle, html) => `<span class="terme" data-terme="${echapper(cle)}">${html}</span>`;
+function cleCode(c) {
+  if (c.startsWith("@")) return "@";
+  if (c.startsWith("/")) c = c.split(" ")[0];
+  else if (/^claude\s+(--continue|-c)\b/.test(c)) c = "claude --continue";
+  else if (/^claude\s+-p\b/.test(c)) c = "claude -p";
+  return TERMES[c] && !TERMES[c].mots ? c : null;
+}
+function marquerCode(c) {
+  const html = `<code>${echapper(c)}</code>`;
+  const cle = cleCode(c);
+  return cle ? baliseTerme(cle, html) : html;
+}
+const marquerMots = html => html.replace(RE_MOTS, m => baliseTerme(MOTS.find(x => x.re.test(m)).cle, m));
 function md(s) {
-  return echapper(s)
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
+  return String(s)
+    .split(/(`[^`]+`)/)
+    .map((morceau, i) => i % 2 ? marquerCode(morceau.slice(1, -1)) : marquerMots(echapper(morceau)))
+    .join("")
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 }
+
+const $bulle = document.createElement("div");
+$bulle.id = "infobulle";
+$bulle.setAttribute("role", "tooltip");
+document.body.append($bulle);
+let termeActif = null;
+function montrerBulle(t) {
+  termeActif = t;
+  $bulle.innerHTML = texteSimple(TERMES[t.dataset.terme].def);
+  $bulle.style.left = "0px";
+  $bulle.style.top = "0px";
+  const r = t.getBoundingClientRect();
+  const b = $bulle.getBoundingClientRect();
+  const marge = 8;
+  const gauche = Math.min(Math.max(r.left + r.width / 2 - b.width / 2, marge), innerWidth - b.width - marge);
+  const haut = r.top - b.height - marge >= marge ? r.top - b.height - marge : r.bottom + marge;
+  $bulle.style.left = `${gauche}px`;
+  $bulle.style.top = `${haut}px`;
+  $bulle.classList.add("visible");
+}
+function cacherBulle() {
+  termeActif = null;
+  $bulle.classList.remove("visible");
+}
+document.addEventListener("mouseover", ev => {
+  const t = ev.target.closest(".terme");
+  if (t === termeActif) return;
+  if (t && !t.closest(".verrou")) montrerBulle(t);
+  else cacherBulle();
+});
+document.addEventListener("pointerdown", ev => { if (!ev.target.closest(".terme")) cacherBulle(); });
+document.addEventListener("keydown", cacherBulle);
+addEventListener("scroll", cacherBulle, { passive: true });
 function melanger(tab) {
   const t = tab.slice();
   for (let i = t.length - 1; i > 0; i--) {
@@ -962,7 +1073,7 @@ function afficherQuestion(id, index) {
         <span><span class="niveau-tag">${md(niveau.titre)}</span> · Question ${index + 1}/${niveau.questions.length}</span>
       </div>
       <div class="progression" aria-hidden="true">${segments}</div>
-      <article class="question">
+      <article class="question verrou">
         <div class="type">${badge}</div>
         <p class="enonce">${md(q.enonce)}</p>
         ${q.consigne ? `<p class="consigne">${md(q.consigne)}</p>` : `<div style="height:14px"></div>`}
@@ -990,6 +1101,7 @@ function enregistrer(id, index, ok) {
   }
   sauver();
   vue.repondu = true;
+  $app.querySelector(".question").classList.remove("verrou");
   const seg = $app.querySelectorAll(".progression span")[index];
   if (seg) seg.className = ok ? "ok" : "ko";
 }
